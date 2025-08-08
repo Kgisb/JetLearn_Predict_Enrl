@@ -34,8 +34,8 @@ def train_model(df):
     encoder_deal_source = LabelEncoder()
     encoder_country = LabelEncoder()
 
-    encoder_deal_source.fit(df['JetLearn Deal Source'].append(pd.Series(["Unknown"])))
-    encoder_country.fit(df['Country'].append(pd.Series(["Unknown"])))
+    encoder_deal_source.fit(pd.concat([df['JetLearn Deal Source'], pd.Series(["Unknown"])], ignore_index=True))
+    encoder_country.fit(pd.concat([df['Country'], pd.Series(["Unknown"])], ignore_index=True))
 
     df['JetLearn Deal Source'] = encoder_deal_source.transform(df['JetLearn Deal Source'])
     df['Country'] = encoder_country.transform(df['Country'])
@@ -89,7 +89,7 @@ if input_file:
             st.warning("⚠️ Missing HubSpot Deal Score values detected — filled with 0")
             df_input['HubSpot Deal Score'] = df_input['HubSpot Deal Score'].fillna(0)
         if (df_input['HubSpot Deal Score'] < 0).any():
-            st.info("ℹ️ Negative HubSpot Deal Score values detected — treated as valid (likely invalid deal signals)")
+            st.info("ℹ️ Negative HubSpot Deal Score values detected — treated as valid (e.g., invalid deals)")
 
         # Predict
         features = ['JetLearn Deal Source', 'Country', 'Age', 'HubSpot Deal Score']
