@@ -3,13 +3,10 @@ import pandas as pd
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
-import joblib
 import os
 
 st.set_page_config(page_title="JetLearn Enrollment Predictor", layout="wide")
-
 st.title("📈 JetLearn Enrollment Predictor")
-st.markdown("This tool predicts whether a deal will result in **enrollment in the same month** based on the uploaded data.")
 
 # === STEP 1: Load and clean data ===
 @st.cache_data
@@ -31,11 +28,17 @@ def load_and_prepare_data(file_path):
 # === STEP 2: Train the model ===
 @st.cache_resource
 def train_model(df):
+    df['JetLearn Deal Source'] = df['JetLearn Deal Source'].fillna("Unknown").astype(str)
+    df['Country'] = df['Country'].fillna("Unknown").astype(str)
+
     encoder_deal_source = LabelEncoder()
     encoder_country = LabelEncoder()
 
-    df['JetLearn Deal Source'] = encoder_deal_source.fit_transform(df['JetLearn Deal Source'])
-    df['Country'] = encoder_country.fit_transform(df['Country'])
+    encoder_deal_source.fit(df['JetLearn Deal Source'].append(pd.Series(["Unknown"])))
+    encoder_country.fit(df['Country'].append(pd.Series(["Unknown"])))
+
+    df['JetLearn Deal Source'] = encoder_deal_source.transform(df['JetLearn Deal Source'])
+    df['Country'] = encoder_country.transform(df['Country'])
 
     X = df[['JetLearn Deal Source', 'Country', 'Age', 'HubSpot Deal Score']]
     y = df['Enroll_Same_Month']
@@ -47,37 +50,54 @@ def train_model(df):
 
     return model, encoder_deal_source, encoder_country
 
-# === STEP 3: Load + Train ===
+# === STEP 3: Safe encoding for prediction ===
+def safe_encode(column, encoder, name):
+    if column.isnull().any():
+        st.warning(f"⚠️ Missing values in '{name}' — replaced with 'Unknown'")
+        column = column.fillna("Unknown")
+    column = column.astype(str)
+    known_classes = list(encoder.classes_)
+    column = column.apply(lambda x: x if x in known_classes else "Unknown")
+    return encoder.transform(column)
+
+# === STEP 4: Load model and data ===
 data_file_path = "Work_JL_DB_Cleaned.csv"
 if not os.path.exists(data_file_path):
-    st.error("❌ 'Work_JL_DB_Cleaned.csv' not found. Please make sure it's in the same folder as this app.")
+    st.error("❌ 'Work_JL_DB_Cleaned.csv' not found. Please ensure it's in the same folder.")
     st.stop()
 
 df_model = load_and_prepare_data(data_file_path)
 model, encoder_deal_source, encoder_country = train_model(df_model)
+st.success("✅ Model trained using Work_JL_DB_Cleaned.csv")
 
-st.success("✅ Model trained successfully using Work_JL_DB_Cleaned.csv")
-
-# === STEP 4: Upload new data for prediction ===
-st.header("📤 Upload File for Prediction")
-input_file = st.file_uploader("Upload a CSV with: Create Date, JetLearn Deal Source, Country, Age, HubSpot Deal Score", type="csv")
+# === STEP 5: Upload and Predict ===
+st.header("📤 Upload CSV to Predict Enrollments")
+input_file = st.file_uploader("Upload file with: Create Date, JetLearn Deal Source, Country, Age, HubSpot Deal Score", type="csv")
 
 if input_file:
     try:
         df_input = pd.read_csv(input_file)
         df_orig = df_input.copy()
 
-        df_input['JetLearn Deal Source'] = encoder_deal_source.transform(df_input['JetLearn Deal Source'])
-        df_input['Country'] = encoder_country.transform(df_input['Country'])
+        # Clean JetLearn Deal Source & Country
+        df_input['JetLearn Deal Source'] = safe_encode(df_input['JetLearn Deal Source'], encoder_deal_source, "JetLearn Deal Source")
+        df_input['Country'] = safe_encode(df_input['Country'], encoder_country, "Country")
 
+        # Clean HubSpot Deal Score
+        df_input['HubSpot Deal Score'] = pd.to_numeric(df_input['HubSpot Deal Score'], errors='coerce')
+        if df_input['HubSpot Deal Score'].isnull().any():
+            st.warning("⚠️ Missing HubSpot Deal Score values detected — filled with 0")
+            df_input['HubSpot Deal Score'] = df_input['HubSpot Deal Score'].fillna(0)
+        if (df_input['HubSpot Deal Score'] < 0).any():
+            st.info("ℹ️ Negative HubSpot Deal Score values detected — treated as valid (likely invalid deal signals)")
+
+        # Predict
         features = ['JetLearn Deal Source', 'Country', 'Age', 'HubSpot Deal Score']
         predictions = model.predict(df_input[features])
-
         df_orig['Predicted Enroll (Same Month)'] = predictions
 
         st.write("📊 Prediction Output", df_orig.head(20))
         csv_out = df_orig.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Predictions", csv_out, "predicted_output.csv", "text/csv")
-
     except Exception as e:
-        st.error(f"⚠️ Error during prediction: {e}")
+        st.error(f"❌ Error during prediction: {e}")
