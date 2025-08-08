@@ -8,7 +8,7 @@ import os
 st.set_page_config(page_title="JetLearn Enrollment Predictor", layout="wide")
 st.title("📈 JetLearn Enrollment Predictor")
 
-# === STEP 1: Load and clean data ===
+# === STEP 1: Load and clean training data ===
 @st.cache_data
 def load_and_prepare_data(file_path):
     df = pd.read_csv(file_path)
@@ -48,7 +48,8 @@ def train_model(df):
     model = GradientBoostingClassifier()
     model.fit(X_train, y_train)
 
-    return model, encoder_deal_source, encoder_country
+    # Return median age to impute in future
+    return model, encoder_deal_source, encoder_country, df['Age'].median()
 
 # === STEP 3: Safe encoding for prediction ===
 def safe_encode(column, encoder, name):
@@ -67,7 +68,7 @@ if not os.path.exists(data_file_path):
     st.stop()
 
 df_model = load_and_prepare_data(data_file_path)
-model, encoder_deal_source, encoder_country = train_model(df_model)
+model, encoder_deal_source, encoder_country, median_age = train_model(df_model)
 st.success("✅ Model trained using Work_JL_DB_Cleaned.csv")
 
 # === STEP 5: Upload and Predict ===
@@ -90,6 +91,12 @@ if input_file:
             df_input['HubSpot Deal Score'] = df_input['HubSpot Deal Score'].fillna(0)
         if (df_input['HubSpot Deal Score'] < 0).any():
             st.info("ℹ️ Negative HubSpot Deal Score values detected — treated as valid (e.g., invalid deals)")
+
+        # Clean Age (using median)
+        df_input['Age'] = pd.to_numeric(df_input['Age'], errors='coerce')
+        if df_input['Age'].isnull().any():
+            st.warning("⚠️ Missing Age values detected — filled with median age")
+            df_input['Age'] = df_input['Age'].fillna(median_age)
 
         # Predict
         features = ['JetLearn Deal Source', 'Country', 'Age', 'HubSpot Deal Score']
